@@ -353,26 +353,15 @@ func (ddr *datadogReceiver) handleStatsV2(w http.ResponseWriter, req *http.Reque
 		ddr.tReceiver.EndMetricsOp(obsCtx, "datadog", *metricsCount, err)
 	}(&metricsCount)
 
-	// Verify content encoding - agent sends gzipped msgpack
+	// Get content encoding from header
 	contentEncoding := req.Header.Get("Content-Encoding")
-	if contentEncoding != "gzip" && contentEncoding != "" {
-		ddr.params.Logger.Warn("Unexpected content encoding for stats payload", zap.String("encoding", contentEncoding))
-	}
 
-	// Create a reader that handles gzip decompression if needed
-	var reader io.ReadCloser
-	if contentEncoding == "gzip" {
-		var gzReader *gzip.Reader
-		gzReader, err = gzip.NewReader(req.Body)
-		if err != nil {
-			ddr.params.Logger.Error("Error creating gzip reader", zap.Error(err))
-			http.Error(w, "Error decompressing payload", http.StatusBadRequest)
-			return
-		}
-		defer gzReader.Close()
-		reader = gzReader
-	} else {
-		reader = req.Body
+	// Create a reader that handles decompression if needed
+	reader, err := createDecompressingReader(req.Body, contentEncoding)
+	if err != nil {
+		ddr.params.Logger.Error("Error creating decompressing reader", zap.Error(err), zap.String("encoding", contentEncoding))
+		http.Error(w, "Error decompressing payload", http.StatusBadRequest)
+		return
 	}
 	defer reader.Close()
 
@@ -387,7 +376,7 @@ func (ddr *datadogReceiver) handleStatsV2(w http.ResponseWriter, req *http.Reque
 	}
 
 	// Validate the payload
-	if statsPayload == nil || len(statsPayload.Stats) == 0 {
+	if len(statsPayload.Stats) == 0 {
 		ddr.params.Logger.Warn("Received empty stats payload")
 		_, _ = w.Write([]byte("OK"))
 		return
@@ -396,9 +385,6 @@ func (ddr *datadogReceiver) handleStatsV2(w http.ResponseWriter, req *http.Reque
 	// Process each ClientStatsPayload within the StatsPayload
 	// The agent may send multiple ClientStatsPayload entries in a single request
 	for _, clientStats := range statsPayload.Stats {
-		if clientStats == nil {
-			continue
-		}
 
 		// Extract metadata from headers (fallback if not in payload)
 		lang := req.Header.Get(header.Lang)
@@ -714,5 +700,20 @@ func createIntakeReverseProxyDirector(site, key string) func(*http.Request) {
 		// but it appears as though the value of that field does not matter,
 		// at least when it comes to matching the actual `DD-API-KEY` we set in the header above.
 		// So, to avoid a bunch of extra expensive work in the collector, we don't touch the body.
+	}
+}
+
+// createDecompressingReader creates a reader that handles decompression based on the content encoding.
+// Supported encodings: gzip. Returns the original reader if encoding is empty or unsupported.
+func createDecompressingReader(body io.ReadCloser, contentEncoding string) (io.ReadCloser, error) {
+	switch contentEncoding {
+	case "gzip":
+		gzReader, err := gzip.NewReader(body)
+		if err != nil {
+			return nil, fmt.Errorf("error creating gzip reader: %w", err)
+		}
+		return gzReader, nil
+	default:
+		return body, nil
 	}
 }
