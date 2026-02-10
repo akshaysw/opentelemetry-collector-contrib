@@ -345,7 +345,6 @@ func (ddr *datadogReceiver) handleLogs(w http.ResponseWriter, req *http.Request)
 // handleStatsV2 handles incoming stats payloads from datadog agent
 // Stats payloads are sent from the DataDog agent at /api/v0.2/stats
 func (ddr *datadogReceiver) handleStatsV2(w http.ResponseWriter, req *http.Request) {
-
 	obsCtx := ddr.tReceiver.StartMetricsOp(req.Context())
 	var err error
 	metricsCount := 0
@@ -385,7 +384,6 @@ func (ddr *datadogReceiver) handleStatsV2(w http.ResponseWriter, req *http.Reque
 	// Process each ClientStatsPayload within the StatsPayload
 	// The agent may send multiple ClientStatsPayload entries in a single request
 	for _, clientStats := range statsPayload.Stats {
-
 		// Extract metadata from headers (fallback if not in payload)
 		lang := req.Header.Get(header.Lang)
 		tracerVersion := req.Header.Get(header.TracerVersion)
